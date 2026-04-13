@@ -95,7 +95,29 @@ python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_conver
 
 ![Interactive viewer interface](assets/docs/interactive-viewer-screenshot.png)
 
-The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
+The default config now opens the viewer with the local Tara robot in the 3D viewport. BVH playback, retargeting, CSV playback, and CSV export work there as well.
+
+To switch the interactive viewer back to the original G1 retarget workflow, set `"viewer_robot": "unitree_g1"` and `"retarget_target": "unitree_g1"` in [assets/default_bvh_to_csv_converter_config.json](/home/jony/soma-retargeter/assets/default_bvh_to_csv_converter_config.json).
+
+### Robot asset viewer
+
+Load a robot model directly into the simulation environment without running the retargeting pipeline.
+
+```bash
+python ./app/robot_model_viewer.py --robot tara --viewer gl
+```
+
+The viewer keeps the final Tara build under `tara` and can also load the existing G1 asset:
+
+```bash
+python ./app/robot_model_viewer.py --robot unitree_g1 --viewer gl
+```
+
+To open any other local MJCF file, pass it explicitly:
+
+```bash
+python ./app/robot_model_viewer.py --mjcf /absolute/path/to/robot.xml --viewer gl
+```
 
 ### Batch conversion (headless)
 
@@ -114,6 +136,7 @@ Batch mode recursively finds all `.bvh` files in the import folder, processes th
 | File | Description |
 |------|-------------|
 | `bvh_to_csv_converter.py` | Main entry point. Drives both interactive and headless batch retargeting modes. |
+| `robot_model_viewer.py` | Minimal simulation viewer for loading Tara, G1, or any local MJCF robot asset. |
 
 ### `soma_retargeter/`
 

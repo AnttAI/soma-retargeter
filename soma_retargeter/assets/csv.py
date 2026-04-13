@@ -43,6 +43,40 @@ class UnitreeG129DOF_CSVConfig:
         "right_wrist_yaw_joint_dof"]
 
     def to_anim_frame(self, csv_row: np.ndarray) -> np.ndarray:
+        return _to_anim_frame_common(csv_row)
+
+    def to_csv_row(self, frame_idx: int, anim_row: np.ndarray) -> List[float]:
+        return _to_csv_row_common(frame_idx, anim_row)
+
+
+@dataclass
+class Tara29DOF_CSVConfig:
+    name: str = "tara_29dof"
+    csv_header: ClassVar[List[str]] = [
+        "Frame",
+        "root_translateX", "root_translateY", "root_translateZ",
+        "root_rotateX", "root_rotateY", "root_rotateZ",
+        "aa_head_yaw_dof", "head_pitch_dof",
+        "left_nero_joint1_dof", "left_nero_joint2_dof", "left_nero_joint3_dof",
+        "left_nero_joint4_dof", "left_nero_joint5_dof", "left_nero_joint6_dof",
+        "left_nero_joint7_dof",
+        "right_nero_joint1_dof", "right_nero_joint2_dof", "right_nero_joint3_dof",
+        "right_nero_joint4_dof", "right_nero_joint5_dof", "right_nero_joint6_dof",
+        "right_nero_joint7_dof",
+        "waist_dof",
+        "left_hip_pitch_dof", "left_hip_roll_dof", "left_hip_yaw_dof",
+        "left_knee_pitch_dof", "left_ankle_pitch_dof", "left_ankle_roll_dof",
+        "right_hip_pitch_dof", "right_hip_roll_dof", "right_hip_yaw_dof",
+        "right_knee_pitch_dof", "right_ankle_pitch_dof", "right_ankle_roll_dof"]
+
+    def to_anim_frame(self, csv_row: np.ndarray) -> np.ndarray:
+        return _to_anim_frame_common(csv_row)
+
+    def to_csv_row(self, frame_idx: int, anim_row: np.ndarray) -> List[float]:
+        return _to_csv_row_common(frame_idx, anim_row)
+
+
+def _to_anim_frame_common(csv_row: np.ndarray) -> np.ndarray:
         """
         Convert one CSV row (including frame index) into one anim buffer frame.
         """
@@ -65,22 +99,40 @@ class UnitreeG129DOF_CSVConfig:
 
         return anim_row
 
-    def to_csv_row(self, frame_idx: int, anim_row: np.ndarray) -> List[float]:
-        """
-        Convert one anim buffer row into a CSV row with this config's layout.
-        """
-        # translation (m -> cm)
-        t = wp.vec3(*anim_row[0:3]) * 100.0
-        # root rotation (quat -> euler deg)
-        q = wp.quat(*anim_row[3:7])
-        euler = R.from_quat([q[0], q[1], q[2], q[3]]).as_euler("xyz", degrees=True)
+def _to_csv_row_common(frame_idx: int, anim_row: np.ndarray) -> List[float]:
+    """
+    Convert one anim buffer row into a CSV row with this config's layout.
+    """
+    # translation (m -> cm)
+    t = wp.vec3(*anim_row[0:3]) * 100.0
+    # root rotation (quat -> euler deg)
+    q = wp.quat(*anim_row[3:7])
+    euler = R.from_quat([q[0], q[1], q[2], q[3]]).as_euler("xyz", degrees=True)
 
-        row = [frame_idx, t[0], t[1], t[2], euler[0], euler[1], euler[2]]
+    row = [frame_idx, t[0], t[1], t[2], euler[0], euler[1], euler[2]]
 
-        # joints (rad -> deg)
-        row.extend(np.rad2deg(anim_row[7:]))
+    # joints (rad -> deg)
+    row.extend(np.rad2deg(anim_row[7:]))
 
-        return row
+    return row
+
+
+_ROBOT_CSV_CONFIGS = {
+    "unitree_g1": UnitreeG129DOF_CSVConfig(),
+    "tara": Tara29DOF_CSVConfig(),
+}
+
+
+def get_csv_config(robot_name: str) -> RobotCSVConfig:
+    try:
+        return _ROBOT_CSV_CONFIGS[robot_name]
+    except KeyError:
+        allowed = ", ".join(sorted(_ROBOT_CSV_CONFIGS))
+        raise ValueError(f"Unknown robot CSV config [{robot_name}]. Allowed values: {allowed}") from None
+
+
+def supports_csv_config(robot_name: str) -> bool:
+    return robot_name in _ROBOT_CSV_CONFIGS
 
 
 def load_csv(file_path: str, fps: float = 120.0, csv_config: RobotCSVConfig = UnitreeG129DOF_CSVConfig()) -> CSVAnimationBuffer:
@@ -99,6 +151,7 @@ def load_csv(file_path: str, fps: float = 120.0, csv_config: RobotCSVConfig = Un
     with open(file_path, 'r', encoding='utf-8') as f:
         print(f"[INFO]: Loading CSV [{file_path}] for robot [{csv_config.name}]")
         csv_data = np.loadtxt(f, delimiter=",", skiprows=1)
+        csv_data = np.atleast_2d(csv_data)
         num_frames = csv_data.shape[0]
 
         # Each anim row is derived by config, so infer size from first row

@@ -1,12 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
-import newton
-
 import pathlib
+import os
+import sys
 import time
+
+import newton
 import warp as wp
+
+try:
+    from viewer_compat import enable_cpu_pinned_fallback
+except ModuleNotFoundError:
+    from app.viewer_compat import enable_cpu_pinned_fallback
+
+try:
+    from cpu_robot_mesh_renderer import CpuRobotMeshRenderer
+except ModuleNotFoundError:
+    from app.cpu_robot_mesh_renderer import CpuRobotMeshRenderer
+
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import soma_retargeter.utils.math_utils as math_utils
 import soma_retargeter.assets.bvh as bvh_utils
@@ -26,6 +41,79 @@ _UI_NEWTON_PANEL_WIDTH  = 320
 _UI_NEWTON_PANEL_MARGIN = 10
 _UI_NEWTON_PANEL_ALPHA  = 0.9
 _DEFAULT_COLOR = (235.0 / 255.0, 245.0 / 255.0, 112.0 / 255.0)
+_VIEWER_ROBOT_MJCF = {
+    "tara": _REPO_ROOT / "tara" / "T1_serial.xml",
+}
+_VIEWER_ROBOT_SCALES = {
+    # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
+    "tara": 1.4121780259421193,
+}
+_VIEWER_ROBOT_SPAWN_OFFSETS = {
+    "tara": (0.0, 0.0, 0.0),
+}
+_VIEWER_ROBOT_ROOT_OFFSETS = {
+    # Source Tara MJCF keeps the feet 1.005646 m above its root frame.
+    # We apply this as a hidden root drop so the soles land on z=0 while the gizmo stays on the floor.
+    "tara": (0.0, 0.0, -1.0056460005066394),
+}
+_VIEWER_ROBOT_JOINT_Q_OVERRIDES = {}
+
+
+def _get_robot_scale(robot_name: str) -> float:
+    return _VIEWER_ROBOT_SCALES.get(robot_name, 1.0)
+
+
+def _get_robot_root_offset(robot_name: str) -> wp.transform:
+    base_offset = _VIEWER_ROBOT_ROOT_OFFSETS.get(robot_name, (0.0, 0.0, 0.0))
+    robot_scale = _get_robot_scale(robot_name)
+    return wp.transform(
+        wp.vec3(base_offset[0] * robot_scale, base_offset[1] * robot_scale, base_offset[2] * robot_scale),
+        wp.quat_identity(),
+    )
+
+
+def _resolve_viewer_robot_mjcf(robot_name: str) -> pathlib.Path:
+    if robot_name == "unitree_g1":
+        return newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml"
+
+    mjcf_path = _VIEWER_ROBOT_MJCF.get(robot_name)
+    if mjcf_path is None:
+        allowed = ", ".join(sorted([*list(_VIEWER_ROBOT_MJCF.keys()), "unitree_g1"]))
+        raise ValueError(f"Unknown viewer robot [{robot_name}]. Allowed values: {allowed}")
+
+    if not mjcf_path.exists():
+        raise FileNotFoundError(f"Viewer robot MJCF not found: {mjcf_path}")
+
+    return mjcf_path
+
+
+def _apply_robot_joint_q_overrides(model, robot_name: str) -> None:
+    joint_overrides = _VIEWER_ROBOT_JOINT_Q_OVERRIDES.get(robot_name)
+    if not joint_overrides:
+        return
+
+    joint_q_values = model.joint_q.numpy()
+    joint_q_starts = model.joint_q_start.numpy()
+
+    for joint_label, joint_q_start in zip(model.joint_label, joint_q_starts):
+        joint_name = joint_label.rsplit("/", 1)[-1]
+        if joint_name in joint_overrides:
+            joint_q_values[int(joint_q_start)] = joint_overrides[joint_name]
+
+    wp.copy(model.joint_q, wp.array(joint_q_values, dtype=wp.float32), 0, 0, len(joint_q_values))
+
+
+def _get_robot_spawn_offset(robot_name: str, robot_index: int, num_robots: int) -> wp.transform:
+    base_offset = _VIEWER_ROBOT_SPAWN_OFFSETS.get(robot_name, (0.0, 0.0, 0.0))
+    robot_scale = _get_robot_scale(robot_name)
+    return wp.transform(
+        wp.vec3(
+            base_offset[0] * robot_scale,
+            base_offset[1] * robot_scale + robot_index - (num_robots - 1) / 2.0,
+            base_offset[2] * robot_scale,
+        ),
+        wp.quat_identity(),
+    )
 
 class Viewer:
     def __init__(self, viewer, config):
@@ -49,39 +137,50 @@ class Viewer:
         self.playback_total_time = 0.0
 
         self.retarget_source_options = ['soma']
-        self.retarget_target_options = ['unitree_g1']
+        self.retarget_target_options = [self.config.get('retarget_target', 'unitree_g1')]
         self.retarget_solver_options = ['Newton']
         self.retarget_solver_idx     = 0
         self.retarget_target_idx     = 0
         self.retarget_source_idx     = 0
+        self.viewer_robot = self.config.get('viewer_robot', self.config.get('retarget_target', 'unitree_g1'))
+        if csv_utils.supports_csv_config(self.viewer_robot):
+            self.retarget_target_options = [self.viewer_robot]
+        self.viewer_robot_supports_motion_io = csv_utils.supports_csv_config(self.viewer_robot)
 
         self.show_skeleton_mesh = True
         self.show_skeleton = False
         self.show_skeleton_joint_axes = False
         self.show_gizmos = True
 
-        self.viewer.renderer.set_title("BVH to CSV Converter")
+        self.viewer.renderer.set_title(f"BVH to CSV Converter - {self.viewer_robot}")
         self.viewer.register_ui_callback(lambda ui: self.gui(ui), position="free")
 
-        g1_builder = newton.ModelBuilder()
-        g1_builder.add_mjcf(
-            newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml")
+        robot_builder = newton.ModelBuilder()
+        robot_builder.add_mjcf(
+            _resolve_viewer_robot_mjcf(self.viewer_robot),
+            scale=_get_robot_scale(self.viewer_robot),
+        )
         
         self.num_robots = 1
-        self.robot_offsets = [wp.transform(wp.vec3(0.0, i - (self.num_robots - 1) / 2.0, 0.0), wp.quat_identity()) for i in range(self.num_robots)]
+        self.robot_offsets = [_get_robot_spawn_offset(self.viewer_robot, i, self.num_robots) for i in range(self.num_robots)]
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
         for _ in range(self.num_robots):
-            builder.add_builder(g1_builder, wp.transform_identity())
+            builder.add_builder(robot_builder, wp.transform_identity())
         self.model = builder.finalize()
+        _apply_robot_joint_q_overrides(self.model, self.viewer_robot)
 
+        enable_cpu_pinned_fallback(self.viewer)
         self.viewer.set_model(self.model)
         self.viewer.set_world_offsets([0, 0, 0])
         self.state = self.model.state()
+        self.cpu_robot_mesh_renderer = None
+        if isinstance(self.viewer, newton.viewer.ViewerGL) and not self.viewer.device.is_cuda:
+            self.cpu_robot_mesh_renderer = CpuRobotMeshRenderer(self.viewer, self.model)
 
-        self.g1_num_joint_q = self.model.joint_coord_count // self.model.articulation_count
-        self.g1_joint_q_offsets = [int(i * self.g1_num_joint_q) for i in range(self.model.articulation_count)]
-        self.g1_default_joint_q_values = self.model.joint_q.numpy()
+        self.robot_num_joint_q = self.model.joint_coord_count // self.model.articulation_count
+        self.robot_joint_q_offsets = [int(i * self.robot_num_joint_q) for i in range(self.model.articulation_count)]
+        self.robot_default_joint_q_values = self.model.joint_q.numpy()
 
         self.coordinate_renderer = CoordinateRenderer()
         self.skeleton = None
@@ -98,7 +197,12 @@ class Viewer:
         self.ui_scene_options(ui)
 
     def load_csv_file(self, path):
-        self.robot_csv_animation_buffers[0] = csv_utils.load_csv(path)
+        if not self.viewer_robot_supports_motion_io:
+            raise RuntimeError(f"CSV playback is not available for viewer robot [{self.viewer_robot}].")
+
+        self.robot_csv_animation_buffers[0] = csv_utils.load_csv(
+            path,
+            csv_config=csv_utils.get_csv_config(self.viewer_robot))
         self.compute_playback_total_time()
 
     def load_bvh_file(self, path):
@@ -136,29 +240,41 @@ class Viewer:
         self.playback_time = wp.clamp(self.playback_time, 0.0, self.playback_total_time)
 
     def update_robot_states(self):
+        robot_root_offset = _get_robot_root_offset(self.viewer_robot)
         for i in range(self.num_robots):
             robot_offset = self.robot_offsets[i]
 
-            joint_q_offset = self.g1_joint_q_offsets[i]
+            joint_q_offset = self.robot_joint_q_offsets[i]
             if self.robot_csv_animation_buffers[i] is not None:
                 buffer = self.robot_csv_animation_buffers[i]
-                # Apply visual offset
                 prev_xform = wp.transform(buffer.xform)
-                buffer.xform = robot_offset
+                # Retargeted CSV data already contains a grounded robot root.
+                # Keep any stored retarget/world alignment and only layer the viewer gizmo offset on top.
+                buffer.xform = wp.mul(robot_offset, prev_xform)
 
                 data = buffer.sample(self.playback_time)
-                wp.copy(self.model.joint_q, wp.array(data, dtype=wp.float32), joint_q_offset, 0, self.g1_num_joint_q)
+                # The retargeting pipeline solves IK at unit scale, but the
+                # viewer model may be uniformly scaled.  Adjust the root
+                # translation so the robot stays grounded at the visual scale.
+                robot_scale = _get_robot_scale(self.viewer_robot)
+                if robot_scale != 1.0:
+                    data[0:3] = data[0:3] * robot_scale
+                wp.copy(self.model.joint_q, wp.array(data, dtype=wp.float32), joint_q_offset, 0, self.robot_num_joint_q)
                 buffer.xform = prev_xform
             else:
                 root_tx = wp.mul(
                     robot_offset,
-                    wp.transform(*self.g1_default_joint_q_values[joint_q_offset:(joint_q_offset + 7)]))
+                    wp.mul(
+                        robot_root_offset,
+                        wp.transform(*self.robot_default_joint_q_values[joint_q_offset:(joint_q_offset + 7)]),
+                    ),
+                )
 
                 wp.copy(
                     self.model.joint_q,
-                    wp.array(self.g1_default_joint_q_values[joint_q_offset:(joint_q_offset + self.g1_num_joint_q)], dtype=wp.float32),
+                    wp.array(self.robot_default_joint_q_values[joint_q_offset:(joint_q_offset + self.robot_num_joint_q)], dtype=wp.float32),
                     joint_q_offset,
-                    0, self.g1_num_joint_q)
+                    0, self.robot_num_joint_q)
                 wp.copy(self.model.joint_q, wp.array(root_tx[0:7], dtype=wp.float32), joint_q_offset, 0, 7)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state, None)
@@ -209,6 +325,8 @@ class Viewer:
                 self.viewer.log_gizmo(f"animation_offset{i}", offset)
         
         self.viewer.log_state(self.state)
+        if self.cpu_robot_mesh_renderer is not None:
+            self.cpu_robot_mesh_renderer.draw(self.state)
         self.viewer.end_frame()
 
     def run(self):
@@ -262,6 +380,11 @@ class Viewer:
 
         # Motion options
         if ui.collapsing_header("Motion", flags=ui.TreeNodeFlags_.default_open):
+            viewer_matches_retarget_target = (
+                self.retarget_target_options[self.retarget_target_idx] == self.viewer_robot
+            )
+            retarget_enabled = self.viewer_robot_supports_motion_io and viewer_matches_retarget_target
+
             ui.separator()
             ui.align_text_to_frame_padding()
             ui.text("BVH Motion:")
@@ -280,14 +403,14 @@ class Viewer:
                     self.load_bvh_file(bvh_path)
             ui.pop_id()
 
-            if (len(self.animation_buffers) == 0):
+            if len(self.animation_buffers) == 0 or not retarget_enabled:
                 ui.begin_disabled()
 
             ui.same_line()
             if ui.button("Retarget"):
                 self.retarget_motion()
             
-            if (len(self.animation_buffers) == 0):
+            if len(self.animation_buffers) == 0 or not retarget_enabled:
                 ui.end_disabled()
 
             ui.align_text_to_frame_padding()
@@ -295,6 +418,8 @@ class Viewer:
             ui.same_line()
             
             ui.push_id(200)
+            if not self.viewer_robot_supports_motion_io:
+                ui.begin_disabled()
             if ui.button("Load"):
                 root = tk.Tk()
                 root.withdraw()
@@ -305,8 +430,10 @@ class Viewer:
 
                 if csv_path:
                     self.load_csv_file(csv_path)
+            if not self.viewer_robot_supports_motion_io:
+                ui.end_disabled()
 
-            if self.robot_csv_animation_buffers[0] is None:
+            if self.robot_csv_animation_buffers[0] is None or not self.viewer_robot_supports_motion_io:
                 ui.begin_disabled()
             ui.pop_id()
 
@@ -320,10 +447,18 @@ class Viewer:
                     defaultextension=".csv",
                     filetypes=[("CSV files", "*.csv")])
                 if save_path:
-                    csv_utils.save_csv(save_path, self.robot_csv_animation_buffers[0])
+                    csv_utils.save_csv(
+                        save_path,
+                        self.robot_csv_animation_buffers[0],
+                        csv_config=csv_utils.get_csv_config(self.viewer_robot))
 
-            if self.robot_csv_animation_buffers[0] is None:
+            if self.robot_csv_animation_buffers[0] is None or not self.viewer_robot_supports_motion_io:
                 ui.end_disabled()
+
+            if not self.viewer_robot_supports_motion_io:
+                ui.separator()
+                ui.text(f"{self.viewer_robot} viewer mode: retarget and CSV playback are unavailable.")
+                ui.text("Use a viewer robot with a registered retarget/CSV config.")
 
         # Visibility options
         ui.spacing()
@@ -342,7 +477,7 @@ class Viewer:
             _, self.show_gizmos = ui.checkbox("Show Gizmos", self.show_gizmos)
             ui.same_line()
             if ui.button("Reset"):
-                self.robot_offsets = [wp.transform(wp.vec3(0.0, i - (self.num_robots - 1) / 2.0, 0.0), wp.quat_identity()) for i in range(self.num_robots)]
+                self.robot_offsets = [_get_robot_spawn_offset(self.viewer_robot, i, self.num_robots) for i in range(self.num_robots)]
                 self.animation_offsets = [wp.transform_identity()] * len(self.skeleton_instances)
         ui.end()
 
@@ -465,7 +600,10 @@ class Viewer:
                     csv_buffer = csv_buffers[i]
                     dst_path = export_path / pathlib.Path(batch[i]).relative_to(import_path).with_suffix(".csv")
                     dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    csv_utils.save_csv(dst_path, csv_buffer)
+                    csv_utils.save_csv(
+                        dst_path,
+                        csv_buffer,
+                        csv_config=csv_utils.get_csv_config(retarget_target))
 
             nb_retargeted_motions += len(batch)
 

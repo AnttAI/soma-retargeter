@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
 from enum import IntEnum, auto
 
 import soma_retargeter.utils.io_utils as io_utils
@@ -15,6 +16,7 @@ class SourceType(IntEnum):
 class TargetType(IntEnum):
     """Enumeration of supported target model types."""
     UNITREE_G1 = auto()
+    TARA = auto()
 
 _SOURCE_TYPE_TO_STR = {
     SourceType.SOMA : "soma"
@@ -22,9 +24,11 @@ _SOURCE_TYPE_TO_STR = {
 _STR_TO_SOURCE_TYPE = {s : t for t, s in _SOURCE_TYPE_TO_STR.items()}
 
 _TARGET_TYPE_TO_STR = {
-    TargetType.UNITREE_G1 : "unitree_g1"
+    TargetType.UNITREE_G1 : "unitree_g1",
+    TargetType.TARA : "tara",
 }
 _STR_TO_TARGET_TYPE = {s : t for t, s in _TARGET_TYPE_TO_STR.items()}
+_REPO_ROOT = io_utils.get_package_root().parent
 
 
 def get_source_str_from_type(source: SourceType) -> str:
@@ -131,14 +135,28 @@ def get_retargeter_config(source: SourceType, target: TargetType) -> dict:
     Raises:
         ValueError: If the source or target type is not supported.
     """
-    if target != TargetType.UNITREE_G1:
-        raise ValueError(f"Unknown target type [{target}].")
-
-    if source == SourceType.SOMA:
-        filename = 'soma_to_g1_retargeter_config.json'
-    else:
+    if source != SourceType.SOMA:
         raise ValueError(f"Unknown source type [{source}] for target [{target}].")
 
-    return io_utils.load_json(
-        io_utils.get_config_file('unitree_g1', filename)
-    )
+    if target == TargetType.UNITREE_G1:
+        config_dir = "unitree_g1"
+        filename = "soma_to_g1_retargeter_config.json"
+    elif target == TargetType.TARA:
+        config_dir = "tara"
+        filename = "soma_to_tara_retargeter_config.json"
+    else:
+        raise ValueError(f"Unknown target type [{target}].")
+
+    return io_utils.load_json(io_utils.get_config_file(config_dir, filename))
+
+
+def get_target_mjcf_path(target: TargetType) -> Path:
+    """Return the MJCF path for a supported retarget target."""
+    if target == TargetType.UNITREE_G1:
+        import newton
+
+        return newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml"
+    if target == TargetType.TARA:
+        return _REPO_ROOT / "tara" / "T1_serial.xml"
+
+    raise ValueError(f"Unknown target type [{target}].")
