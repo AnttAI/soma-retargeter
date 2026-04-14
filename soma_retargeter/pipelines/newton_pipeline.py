@@ -279,7 +279,7 @@ class NewtonPipeline:
                 if frame > (len(self.input_targets[env])-1):
                     continue
 
-                joint_q_data[env][frame] = data[env]
+                joint_q_data[env][frame] = data[env].copy()
 
             #end_time = time.time()
             #print(f"Time taken for frame {frame}: {end_time - start_time} seconds")
