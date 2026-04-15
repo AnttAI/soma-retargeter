@@ -454,7 +454,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/base_link.dae" />
+        <mesh filename="meshes/nero/base_link.STL" />
       </geometry>
     </visual>
     <collision>
@@ -473,7 +473,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_base.dae" />
+        <mesh filename="meshes/nero/gripper_base.stl" />
       </geometry>
     </visual>
     <collision>
@@ -492,7 +492,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_flange.dae" />
+        <mesh filename="meshes/nero/gripper_flange.stl" />
       </geometry>
     </visual>
     <collision>
@@ -511,7 +511,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_link1.dae" />
+        <mesh filename="meshes/nero/gripper_link1.stl" />
       </geometry>
     </visual>
     <collision>
@@ -530,7 +530,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_link2.dae" />
+        <mesh filename="meshes/nero/gripper_link2.stl" />
       </geometry>
     </visual>
     <collision>
@@ -549,7 +549,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link1.dae" />
+        <mesh filename="meshes/nero/Link1.STL" />
       </geometry>
     </visual>
     <collision>
@@ -568,7 +568,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link2.dae" />
+        <mesh filename="meshes/nero/Link2.STL" />
       </geometry>
     </visual>
     <collision>
@@ -587,7 +587,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link3.dae" />
+        <mesh filename="meshes/nero/Link3.STL" />
       </geometry>
     </visual>
     <collision>
@@ -606,7 +606,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link4.dae" />
+        <mesh filename="meshes/nero/Link4.STL" />
       </geometry>
     </visual>
     <collision>
@@ -625,7 +625,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link5.dae" />
+        <mesh filename="meshes/nero/Link5.STL" />
       </geometry>
     </visual>
     <collision>
@@ -644,7 +644,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link6.dae" />
+        <mesh filename="meshes/nero/Link6.STL" />
       </geometry>
     </visual>
     <collision>
@@ -663,7 +663,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link7.dae" />
+        <mesh filename="meshes/nero/Link7.STL" />
       </geometry>
     </visual>
     <collision>
@@ -679,18 +679,6 @@
       <mass value="0.05" />
       <inertia ixx="2.697e-05" ixy="0" ixz="0" iyy="4.311e-05" iyz="0" izz="2.479e-05" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="-1.57 -1.57 -1.57" />
-      <geometry>
-        <mesh filename="meshes/nero/stand_v1.dae" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="-1.57 -1.57 -1.57" />
-      <geometry>
-        <mesh filename="meshes/nero/stand_v1.dae" />
-      </geometry>
-    </collision>
   </link>
   <link name="right_base_link">
     <inertial>
@@ -701,7 +689,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/base_link.dae" />
+        <mesh filename="meshes/nero/base_link.STL" />
       </geometry>
     </visual>
     <collision>
@@ -720,7 +708,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_base.dae" />
+        <mesh filename="meshes/nero/gripper_base.stl" />
       </geometry>
     </visual>
     <collision>
@@ -739,7 +727,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_flange.dae" />
+        <mesh filename="meshes/nero/gripper_flange.stl" />
       </geometry>
     </visual>
     <collision>
@@ -758,7 +746,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_link1.dae" />
+        <mesh filename="meshes/nero/gripper_link1.stl" />
       </geometry>
     </visual>
     <collision>
@@ -777,7 +765,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/gripper_link2.dae" />
+        <mesh filename="meshes/nero/gripper_link2.stl" />
       </geometry>
     </visual>
     <collision>
@@ -796,7 +784,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link1.dae" />
+        <mesh filename="meshes/nero/Link1.STL" />
       </geometry>
     </visual>
     <collision>
@@ -815,7 +803,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link2.dae" />
+        <mesh filename="meshes/nero/Link2.STL" />
       </geometry>
     </visual>
     <collision>
@@ -834,7 +822,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link3.dae" />
+        <mesh filename="meshes/nero/Link3.STL" />
       </geometry>
     </visual>
     <collision>
@@ -853,7 +841,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link4.dae" />
+        <mesh filename="meshes/nero/Link4.STL" />
       </geometry>
     </visual>
     <collision>
@@ -872,7 +860,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link5.dae" />
+        <mesh filename="meshes/nero/Link5.STL" />
       </geometry>
     </visual>
     <collision>
@@ -891,7 +879,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link6.dae" />
+        <mesh filename="meshes/nero/Link6.STL" />
       </geometry>
     </visual>
     <collision>
@@ -910,7 +898,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="meshes/nero/dae/link7.dae" />
+        <mesh filename="meshes/nero/Link7.STL" />
       </geometry>
     </visual>
     <collision>
@@ -926,18 +914,6 @@
       <mass value="0.05" />
       <inertia ixx="2.697e-05" ixy="0" ixz="0" iyy="4.311e-05" iyz="0" izz="2.479e-05" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="-1.57 -1.57 -1.57" />
-      <geometry>
-        <mesh filename="meshes/nero/stand_v1.dae" />
-      </geometry>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="-1.57 -1.57 -1.57" />
-      <geometry>
-        <mesh filename="meshes/nero/stand_v1.dae" />
-      </geometry>
-    </collision>
   </link>
   <joint name="left_joint1" type="revolute">
     <origin xyz="0 0 0.138" rpy="0 0 0" />

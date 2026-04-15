@@ -71,7 +71,7 @@ class NewtonPipeline:
         self.feet_stabilizer = None
 
         self.robot_builder = newton.ModelBuilder()
-        self.robot_builder.add_mjcf(pipeline_utils.get_target_mjcf_path(self.target_type))
+        pipeline_utils.add_target_asset(self.robot_builder, self.target_type)
 
         self.human_robot_scaler = HumanToRobotScaler(
             skeleton,

@@ -76,6 +76,37 @@ class Tara29DOF_CSVConfig:
         return _to_csv_row_common(frame_idx, anim_row)
 
 
+@dataclass
+class T235DOF_CSVConfig:
+    name: str = "t2_35dof"
+    csv_header: ClassVar[List[str]] = [
+        "Frame",
+        "root_translateX", "root_translateY", "root_translateZ",
+        "root_rotateX", "root_rotateY", "root_rotateZ",
+        "waist_yaw_joint_dof", "waist_roll_joint_dof", "waist_pitch_joint_dof",
+        "head_pitch_joint_dof", "head_yaw_joint_dof",
+        "right_joint1_dof", "right_joint2_dof", "right_joint3_dof",
+        "right_joint4_dof", "right_joint5_dof", "right_joint6_dof",
+        "right_joint7_dof",
+        "right_gripper_joint1_dof", "right_gripper_joint2_dof",
+        "left_joint1_dof", "left_joint2_dof", "left_joint3_dof",
+        "left_joint4_dof", "left_joint5_dof", "left_joint6_dof",
+        "left_joint7_dof",
+        "left_gripper_joint1_dof", "left_gripper_joint2_dof",
+        "left_hip_pitch_joint_dof", "left_hip_roll_joint_dof",
+        "left_hip_yaw_joint_dof", "left_knee_joint_dof",
+        "left_ankle_roll_joint_dof", "left_ankle_pitch_joint_dof",
+        "right_hip_pitch_joint_dof", "right_hip_roll_joint_dof",
+        "right_hip_yaw_joint_dof", "right_knee_joint_dof",
+        "right_ankle_roll_joint_dof", "right_ankle_pitch_joint_dof"]
+
+    def to_anim_frame(self, csv_row: np.ndarray) -> np.ndarray:
+        return _to_anim_frame_common(csv_row)
+
+    def to_csv_row(self, frame_idx: int, anim_row: np.ndarray) -> List[float]:
+        return _to_csv_row_common(frame_idx, anim_row)
+
+
 def _to_anim_frame_common(csv_row: np.ndarray) -> np.ndarray:
         """
         Convert one CSV row (including frame index) into one anim buffer frame.
@@ -120,6 +151,7 @@ def _to_csv_row_common(frame_idx: int, anim_row: np.ndarray) -> List[float]:
 _ROBOT_CSV_CONFIGS = {
     "unitree_g1": UnitreeG129DOF_CSVConfig(),
     "tara": Tara29DOF_CSVConfig(),
+    "t2": T235DOF_CSVConfig(),
 }
 
 

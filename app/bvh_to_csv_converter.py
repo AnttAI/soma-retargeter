@@ -41,20 +41,24 @@ _UI_NEWTON_PANEL_WIDTH  = 320
 _UI_NEWTON_PANEL_MARGIN = 10
 _UI_NEWTON_PANEL_ALPHA  = 0.9
 _DEFAULT_COLOR = (235.0 / 255.0, 245.0 / 255.0, 112.0 / 255.0)
-_VIEWER_ROBOT_MJCF = {
+_VIEWER_ROBOT_ASSETS = {
     "tara": _REPO_ROOT / "tara" / "T1_serial.xml",
+    "t2": _REPO_ROOT / "antt_t2" / "T2_serial_nero_arms.urdf",
 }
 _VIEWER_ROBOT_SCALES = {
     # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
     "tara": 1.4121780259421193,
+    "t2": 1.0,
 }
 _VIEWER_ROBOT_SPAWN_OFFSETS = {
     "tara": (0.0, 0.0, 0.0),
+    "t2": (0.0, 0.0, 0.0),
 }
 _VIEWER_ROBOT_ROOT_OFFSETS = {
     # Source Tara MJCF keeps the feet 1.005646 m above its root frame.
     # We apply this as a hidden root drop so the soles land on z=0 while the gizmo stays on the floor.
     "tara": (0.0, 0.0, -1.0056460005066394),
+    "t2": (0.0, 0.0, 1.032823),
 }
 _VIEWER_ROBOT_JOINT_Q_OVERRIDES = {}
 
@@ -72,19 +76,26 @@ def _get_robot_root_offset(robot_name: str) -> wp.transform:
     )
 
 
-def _resolve_viewer_robot_mjcf(robot_name: str) -> pathlib.Path:
+def _resolve_viewer_robot_asset(robot_name: str) -> pathlib.Path:
     if robot_name == "unitree_g1":
         return newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml"
 
-    mjcf_path = _VIEWER_ROBOT_MJCF.get(robot_name)
-    if mjcf_path is None:
-        allowed = ", ".join(sorted([*list(_VIEWER_ROBOT_MJCF.keys()), "unitree_g1"]))
+    asset_path = _VIEWER_ROBOT_ASSETS.get(robot_name)
+    if asset_path is None:
+        allowed = ", ".join(sorted([*list(_VIEWER_ROBOT_ASSETS.keys()), "unitree_g1"]))
         raise ValueError(f"Unknown viewer robot [{robot_name}]. Allowed values: {allowed}")
 
-    if not mjcf_path.exists():
-        raise FileNotFoundError(f"Viewer robot MJCF not found: {mjcf_path}")
+    if not asset_path.exists():
+        raise FileNotFoundError(f"Viewer robot asset not found: {asset_path}")
 
-    return mjcf_path
+    return asset_path
+
+
+def _add_viewer_robot_asset(builder: newton.ModelBuilder, robot_asset: pathlib.Path, robot_scale: float) -> None:
+    if robot_asset.suffix.lower() == ".urdf":
+        builder.add_urdf(str(robot_asset), floating=True, scale=robot_scale)
+    else:
+        builder.add_mjcf(str(robot_asset), scale=robot_scale)
 
 
 def _apply_robot_joint_q_overrides(model, robot_name: str) -> None:
@@ -156,9 +167,10 @@ class Viewer:
         self.viewer.register_ui_callback(lambda ui: self.gui(ui), position="free")
 
         robot_builder = newton.ModelBuilder()
-        robot_builder.add_mjcf(
-            _resolve_viewer_robot_mjcf(self.viewer_robot),
-            scale=_get_robot_scale(self.viewer_robot),
+        _add_viewer_robot_asset(
+            robot_builder,
+            _resolve_viewer_robot_asset(self.viewer_robot),
+            _get_robot_scale(self.viewer_robot),
         )
         
         self.num_robots = 1

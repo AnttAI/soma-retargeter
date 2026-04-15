@@ -95,25 +95,26 @@ python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_conver
 
 ![Interactive viewer interface](assets/docs/interactive-viewer-screenshot.png)
 
-The default config now opens the viewer with the local Tara robot in the 3D viewport. BVH playback, retargeting, CSV playback, and CSV export work there as well.
+The default config opens the viewer with the local T2 robot in the 3D viewport. BVH playback, retargeting, CSV playback, and CSV export use the T2 target by default.
 
-To switch the interactive viewer back to the original G1 retarget workflow, set `"viewer_robot": "unitree_g1"` and `"retarget_target": "unitree_g1"` in [assets/default_bvh_to_csv_converter_config.json](/home/jony/soma-retargeter/assets/default_bvh_to_csv_converter_config.json).
+To switch the interactive viewer to another retarget workflow, set `"viewer_robot"` and `"retarget_target"` to `"unitree_g1"` or `"tara"` in [assets/default_bvh_to_csv_converter_config.json](/home/jony/soma-retargeter/assets/default_bvh_to_csv_converter_config.json).
 
 ### Robot asset viewer
 
 Load a robot model directly into the simulation environment without running the retargeting pipeline.
 
 ```bash
-python ./app/robot_model_viewer.py --robot tara --viewer gl
+python ./app/robot_model_viewer.py --robot t2 --viewer gl
 ```
 
-The viewer keeps the final Tara build under `tara` and can also load the existing G1 asset:
+The viewer keeps the local T2 build under `antt_t2` and can also load Tara or the existing G1 asset:
 
 ```bash
+python ./app/robot_model_viewer.py --robot tara --viewer gl
 python ./app/robot_model_viewer.py --robot unitree_g1 --viewer gl
 ```
 
-To open any other local MJCF file, pass it explicitly:
+To open any other local MJCF or URDF file, pass it explicitly:
 
 ```bash
 python ./app/robot_model_viewer.py --mjcf /absolute/path/to/robot.xml --viewer gl
@@ -136,7 +137,7 @@ Batch mode recursively finds all `.bvh` files in the import folder, processes th
 | File | Description |
 |------|-------------|
 | `bvh_to_csv_converter.py` | Main entry point. Drives both interactive and headless batch retargeting modes. |
-| `robot_model_viewer.py` | Minimal simulation viewer for loading Tara, G1, or any local MJCF robot asset. |
+| `robot_model_viewer.py` | Minimal simulation viewer for loading T2, Tara, G1, or any local MJCF/URDF robot asset. |
 
 ### `soma_retargeter/`
 

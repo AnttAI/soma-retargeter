@@ -19,18 +19,22 @@ except ModuleNotFoundError:
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TARA_DIR = _REPO_ROOT / "tara"
+_T2_DIR = _REPO_ROOT / "antt_t2"
 
 _ROBOT_MODEL_PATHS = {
     "tara": _TARA_DIR / "T1_serial.xml",
+    "t2": _T2_DIR / "T2_serial_nero_arms.urdf",
 }
 _ROBOT_MODEL_SCALES = {
     # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
     "tara": 1.4121780259421193,
+    "t2": 1.0,
 }
 _ROBOT_MODEL_SPAWN_OFFSETS = {
     # Source Tara MJCF keeps the feet 1.005646 m above its root frame.
     # We drop by that amount (then apply the uniform robot scale) so the soles land on z=0.
     "tara": (0.0, 0.0, -1.0056460005066394),
+    "t2": (0.0, 0.0, 1.032823),
 }
 _ROBOT_MODEL_JOINT_Q_OVERRIDES = {}
 
@@ -47,7 +51,7 @@ def _resolve_robot_asset(robot: str, mjcf_path: str | None) -> Path:
             raise ValueError(f"Unknown robot [{robot}]. Allowed values: {allowed}")
 
     if not path.exists():
-        raise FileNotFoundError(f"Robot MJCF file not found: {path}")
+        raise FileNotFoundError(f"Robot asset file not found: {path}")
 
     return path
 
@@ -77,12 +81,19 @@ def _apply_robot_joint_q_overrides(model, robot_name: str | None) -> None:
     wp.copy(model.joint_q, wp.array(joint_q_values, dtype=wp.float32), 0, 0, len(joint_q_values))
 
 
+def _add_robot_asset(builder: newton.ModelBuilder, robot_asset: Path, robot_scale: float) -> None:
+    if robot_asset.suffix.lower() == ".urdf":
+        builder.add_urdf(str(robot_asset), floating=True, scale=robot_scale)
+    else:
+        builder.add_mjcf(str(robot_asset), scale=robot_scale)
+
+
 def _build_model(robot_asset: Path, num_robots: int):
     robot_name = next((name for name, path in _ROBOT_MODEL_PATHS.items() if path == robot_asset), None)
     robot_scale = _get_robot_scale(robot_name)
 
     robot_builder = newton.ModelBuilder()
-    robot_builder.add_mjcf(robot_asset, scale=robot_scale)
+    _add_robot_asset(robot_builder, robot_asset, robot_scale)
 
     builder = newton.ModelBuilder()
     builder.add_ground_plane()
@@ -113,14 +124,14 @@ def main():
     parser.add_argument(
         "--robot",
         type=str,
-        default="tara",
-        help="Robot asset to load. Supported values: tara, unitree_g1.",
+        default="t2",
+        help="Robot asset to load. Supported values: t2, tara, unitree_g1.",
     )
     parser.add_argument(
         "--mjcf",
         type=lambda x: None if x == "None" else str(x),
         default=None,
-        help="Optional explicit MJCF path. Overrides --robot when set.",
+        help="Optional explicit MJCF or URDF path. Overrides --robot when set.",
     )
     parser.add_argument(
         "--num-robots",
@@ -141,7 +152,8 @@ def main():
         newton.eval_fk(model, model.joint_q, model.joint_qd, state, None)
 
         title = args.robot if args.mjcf is None else robot_asset.stem
-        viewer.renderer.set_title(f"Robot Model Viewer - {title}")
+        if hasattr(viewer, "renderer"):
+            viewer.renderer.set_title(f"Robot Model Viewer - {title}")
         enable_cpu_pinned_fallback(viewer)
         viewer.set_model(model)
         viewer.set_world_offsets([0, 0, 0])

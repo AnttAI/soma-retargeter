@@ -17,6 +17,7 @@ class TargetType(IntEnum):
     """Enumeration of supported target model types."""
     UNITREE_G1 = auto()
     TARA = auto()
+    T2 = auto()
 
 _SOURCE_TYPE_TO_STR = {
     SourceType.SOMA : "soma"
@@ -26,6 +27,7 @@ _STR_TO_SOURCE_TYPE = {s : t for t, s in _SOURCE_TYPE_TO_STR.items()}
 _TARGET_TYPE_TO_STR = {
     TargetType.UNITREE_G1 : "unitree_g1",
     TargetType.TARA : "tara",
+    TargetType.T2 : "t2",
 }
 _STR_TO_TARGET_TYPE = {s : t for t, s in _TARGET_TYPE_TO_STR.items()}
 _REPO_ROOT = io_utils.get_package_root().parent
@@ -144,19 +146,38 @@ def get_retargeter_config(source: SourceType, target: TargetType) -> dict:
     elif target == TargetType.TARA:
         config_dir = "tara"
         filename = "soma_to_tara_retargeter_config.json"
+    elif target == TargetType.T2:
+        config_dir = "t2"
+        filename = "soma_to_t2_retargeter_config.json"
     else:
         raise ValueError(f"Unknown target type [{target}].")
 
     return io_utils.load_json(io_utils.get_config_file(config_dir, filename))
 
 
-def get_target_mjcf_path(target: TargetType) -> Path:
-    """Return the MJCF path for a supported retarget target."""
+def get_target_asset_path(target: TargetType) -> Path:
+    """Return the robot asset path for a supported retarget target."""
     if target == TargetType.UNITREE_G1:
         import newton
 
         return newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml"
     if target == TargetType.TARA:
         return _REPO_ROOT / "tara" / "T1_serial.xml"
+    if target == TargetType.T2:
+        return _REPO_ROOT / "antt_t2" / "T2_serial_nero_arms.urdf"
 
     raise ValueError(f"Unknown target type [{target}].")
+
+
+def get_target_mjcf_path(target: TargetType) -> Path:
+    """Return the robot asset path for a supported retarget target."""
+    return get_target_asset_path(target)
+
+
+def add_target_asset(builder, target: TargetType) -> None:
+    """Add a supported target robot asset to a Newton model builder."""
+    asset_path = get_target_asset_path(target)
+    if asset_path.suffix.lower() == ".urdf":
+        builder.add_urdf(str(asset_path), floating=True)
+    else:
+        builder.add_mjcf(str(asset_path))
