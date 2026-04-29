@@ -48,7 +48,8 @@ _VIEWER_ROBOT_ASSETS = {
 _VIEWER_ROBOT_SCALES = {
     # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
     "tara": 1.4121780259421193,
-    "t2": 1.0,
+    # Matches T2's visual height to the rendered SOMA human mesh height at frame 0.
+    "t2": 0.9589869491995866,
 }
 _VIEWER_ROBOT_SPAWN_OFFSETS = {
     "tara": (0.0, 0.0, 0.0),
@@ -126,6 +127,7 @@ def _get_robot_spawn_offset(robot_name: str, robot_index: int, num_robots: int) 
         wp.quat_identity(),
     )
 
+
 class Viewer:
     def __init__(self, viewer, config):
         self.viewer = viewer
@@ -185,6 +187,7 @@ class Viewer:
         enable_cpu_pinned_fallback(self.viewer)
         self.viewer.set_model(self.model)
         self.viewer.set_world_offsets([0, 0, 0])
+        self._apply_initial_camera()
         self.state = self.model.state()
         self.cpu_robot_mesh_renderer = None
         if isinstance(self.viewer, newton.viewer.ViewerGL) and not self.viewer.device.is_cuda:
@@ -203,6 +206,16 @@ class Viewer:
         self.animation_buffers = []
         self.skeleton_instances = []
         self.robot_csv_animation_buffers = [None for _ in range(self.num_robots)]
+
+    def _apply_initial_camera(self) -> None:
+        camera_config = self.config.get("viewer_initial_camera")
+        if camera_config is None:
+            return
+
+        position = camera_config.get("position", [10.0, 0.0, 2.0])
+        pitch = camera_config.get("pitch", 0.0)
+        yaw = camera_config.get("yaw", -180.0)
+        self.viewer.set_camera(wp.vec3(*position), float(pitch), float(yaw))
 
     def gui(self, ui):
         self.ui_playback_controls(ui)

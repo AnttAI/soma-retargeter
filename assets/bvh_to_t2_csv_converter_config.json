@@ -1,0 +1,12 @@
+{
+	"import_folder": "assets/motions/bvh/240529",
+	"export_folder": "assets/motions/t2_csv/240529",
+	"batch_size": 100,
+	"retargeter": "Newton",
+	"retarget_source": "soma",
+	"retarget_target": "t2",
+	"viewer_robot": "t2",
+	"retarget_source_facing_direction": "Mujoco",
+	"viewer_initial_source_yaw_degrees": 180.0,
+	"viewer_initial_robot_yaw_degrees": 0.0
+}

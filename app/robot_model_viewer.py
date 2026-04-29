@@ -28,7 +28,8 @@ _ROBOT_MODEL_PATHS = {
 _ROBOT_MODEL_SCALES = {
     # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
     "tara": 1.4121780259421193,
-    "t2": 1.0,
+    # Matches T2's visual height to the rendered SOMA human mesh height at frame 0.
+    "t2": 0.9589869491995866,
 }
 _ROBOT_MODEL_SPAWN_OFFSETS = {
     # Source Tara MJCF keeps the feet 1.005646 m above its root frame.

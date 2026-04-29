@@ -44,19 +44,19 @@
             "t_body": "right_link2",
             "r_body": "right_link2",
             "t_weight": 2.3,
-            "r_weight": 0.25
+            "r_weight": 0.05
         },
         "RightForeArm": {
             "t_body": "right_link4",
             "r_body": "right_link4",
             "t_weight": 1.8,
-            "r_weight": 0.25
+            "r_weight": 0.05
         },
         "RightHand": {
             "t_body": "right_link7",
             "r_body": "right_link7",
-            "t_weight": 3.0,
-            "r_weight": 0.6
+            "t_weight": 2.0,
+            "r_weight": 0.15
         },
         "LeftLeg": {
             "t_body": "left_hip_roll_link",
