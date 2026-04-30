@@ -926,7 +926,7 @@
     <origin xyz="0 0 0.138" rpy="0 0 0" />
     <parent link="right_base_link" />
     <child link="right_link1" />
-    <axis xyz="0 0 -1" />
+    <axis xyz="0 0 1" />
     <limit lower="-2.7" upper="2.7" effort="0" velocity="0" />
   </joint>
   <joint name="left_joint2" type="revolute">
