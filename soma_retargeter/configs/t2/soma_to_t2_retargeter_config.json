@@ -9,6 +9,16 @@
     "smooth_joint_filter_weight": 0.0,
     "collision_weight": 0.0,
     "enable_post_processing": false,
+    "initial_joint_q_overrides_degrees": {
+        "right_joint3": 100.0
+    },
+    "preferred_joint_q_degrees": {
+        "weight": 1.0,
+        "joints": {
+            "right_joint6": 0.0,
+            "right_joint7": 0.0
+        }
+    },
     "ik_map": {
         "Hips": {
             "t_body": "pelvis",
