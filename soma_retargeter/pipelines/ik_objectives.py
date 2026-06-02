@@ -85,6 +85,22 @@ def _joint_target_residuals(
 
 
 @wp.kernel
+def _temporal_joint_target_residuals(
+    joint_q: wp.array2d(dtype=wp.float32),       # (n_batch, n_coords)
+    coord_targets: wp.array2d(dtype=wp.float32), # (n_batch, n_coords)
+    coord_masks: wp.array1d(dtype=wp.float32),   # (n_coords)
+    weight: wp.array1d(dtype=wp.float32),        # (1)
+    start_idx: int,
+    # outputs
+    residuals: wp.array2d(dtype=wp.float32),     # (n_batch, n_residuals)
+):
+    problem, coord_idx = wp.tid()
+    residuals[problem, start_idx + coord_idx] = (
+        joint_q[problem, coord_idx] - coord_targets[problem, coord_idx]
+    ) * coord_masks[coord_idx] * weight[0]
+
+
+@wp.kernel
 def _joint_target_jac_analytic(
     coord_to_dof: wp.array1d(dtype=wp.int32),    # (n_coords)
     coord_masks: wp.array1d(dtype=wp.float32),   # (n_coords)
@@ -256,6 +272,94 @@ class IKSmoothJointFilter(ik.IKObjective):
                 self.n_dofs,
                 start_idx,
                 self._weight,
+            ],
+            outputs=[jacobian],
+            device=self.device,
+        )
+
+
+class IKTemporalJointTarget(ik.IKObjective):
+    """Penalizes selected joint coordinates away from their previous-frame values."""
+
+    def __init__(self, coord_masks, weight=1.0):
+        super().__init__()
+        self.coord_masks_np = coord_masks.astype(np.float32)
+        self.coord_targets = None
+        self.coord_masks = None
+        self.coord_to_dof = None
+        self.e_array = None
+        self._weight = wp.array([weight], dtype=wp.float32)
+
+    def init_buffers(self, model, jacobian_mode):
+        self._require_batch_layout()
+
+        n_coords = model.joint_coord_count
+        self.coord_targets = wp.zeros((self.n_batch, n_coords), dtype=wp.float32, device=self.device)
+        self.coord_masks = wp.array(self.coord_masks_np, dtype=wp.float32, device=self.device)
+
+        coord_to_dof_np = np.full(n_coords, -1, dtype=np.int32)
+        q_start_np = model.joint_q_start.numpy()
+        qd_start_np = model.joint_qd_start.numpy()
+        joint_dof_dim_np = model.joint_dof_dim.numpy()
+
+        for j in range(model.joint_count):
+            coord0 = q_start_np[j]
+            dof0 = qd_start_np[j]
+            lin, ang = joint_dof_dim_np[j]
+            for k in range(lin + ang):
+                if coord0 + k < n_coords:
+                    coord_to_dof_np[coord0 + k] = dof0 + k
+
+        self.coord_to_dof = wp.array(coord_to_dof_np, dtype=wp.int32, device=self.device)
+
+        if jacobian_mode == IKJacobianType.AUTODIFF:
+            e = np.zeros((self.n_batch, self.total_residuals), dtype=np.float32)
+            for prob_idx in range(self.n_batch):
+                for coord_idx in range(n_coords):
+                    e[prob_idx, self.residual_offset + coord_idx] = 1.0
+            self.e_array = wp.array(e.flatten(), dtype=wp.float32, device=self.device)
+
+    def supports_analytic(self):
+        return True
+
+    def residual_dim(self):
+        return len(self.coord_masks_np)
+
+    def set_targets(self, joint_q):
+        if self.coord_targets is not None:
+            wp.copy(self.coord_targets, joint_q)
+
+    def compute_residuals(self, body_q, joint_q, model, residuals, start_idx, problem_idx):
+        count = joint_q.shape[0]
+        wp.launch(
+            _temporal_joint_target_residuals,
+            dim=[count, model.joint_coord_count],
+            inputs=[
+                joint_q,
+                self.coord_targets,
+                self.coord_masks,
+                self._weight,
+                start_idx,
+            ],
+            outputs=[residuals],
+            device=self.device,
+        )
+
+    def compute_jacobian_autodiff(self, tape, model, jacobian, start_idx, dq_dof):
+        self._require_batch_layout()
+        tape.backward(grads={tape.outputs[0]: self.e_array})
+        self.compute_jacobian_analytic(None, None, model, jacobian, None, start_idx)
+
+    def compute_jacobian_analytic(self, body_q, joint_q, model, jacobian, joint_S_s, start_idx):
+        count = self.n_batch
+        wp.launch(
+            _joint_target_jac_analytic,
+            dim=[count, model.joint_coord_count],
+            inputs=[
+                self.coord_to_dof,
+                self.coord_masks,
+                self._weight,
+                start_idx,
             ],
             outputs=[jacobian],
             device=self.device,

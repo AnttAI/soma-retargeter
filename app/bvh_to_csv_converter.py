@@ -48,8 +48,8 @@ _VIEWER_ROBOT_ASSETS = {
 _VIEWER_ROBOT_SCALES = {
     # Matches Tara's visual height to the rendered SOMA human mesh height at frame 0.
     "tara": 1.4121780259421193,
-    # Matches T2's visual height to the rendered SOMA human mesh height at frame 0.
-    "t2": 0.9589869491995866,
+    # Matches T2's shoulder height to the rendered SOMA skeleton shoulder height at frame 0.
+    "t2": 0.9511034265585501,
 }
 _VIEWER_ROBOT_SPAWN_OFFSETS = {
     "tara": (0.0, 0.0, 0.0),

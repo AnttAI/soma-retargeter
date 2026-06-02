@@ -4,17 +4,37 @@
     "num_stabilization_frames": 5,
     "human_robot_scaler_config": "t2/soma_to_t2_scaler_config.json",
     "model_height": 1.8,
-    "ik_iterations": 24,
+    "ik_iterations": 48,
     "joint_limit_weight": 8.0,
     "smooth_joint_filter_weight": 0.0,
+    "temporal_joint_smooth_weight": 0.2,
+    "temporal_joint_smooth_joints": [
+        "left_joint1",
+        "left_joint2",
+        "left_joint3",
+        "left_joint4",
+        "left_joint5",
+        "left_joint6",
+        "left_joint7",
+        "right_joint1",
+        "right_joint2",
+        "right_joint3",
+        "right_joint4",
+        "right_joint5",
+        "right_joint6",
+        "right_joint7"
+    ],
     "collision_weight": 0.0,
     "enable_post_processing": false,
     "initial_joint_q_overrides_degrees": {
+        "left_joint3": -100.0,
         "right_joint3": 100.0
     },
     "preferred_joint_q_degrees": {
-        "weight": 1.0,
+        "weight": 1.2,
         "joints": {
+            "left_joint6": 0.0,
+            "left_joint7": 0.0,
             "right_joint6": 0.0,
             "right_joint7": 0.0
         }
@@ -35,38 +55,38 @@
         "LeftArm": {
             "t_body": "left_link2",
             "r_body": "left_link2",
-            "t_weight": 2.3,
-            "r_weight": 0.25
+            "t_weight": 3.0,
+            "r_weight": 0.05
         },
         "LeftForeArm": {
             "t_body": "left_link4",
             "r_body": "left_link4",
-            "t_weight": 1.8,
-            "r_weight": 0.25
+            "t_weight": 6.0,
+            "r_weight": 0.0
         },
         "LeftHand": {
             "t_body": "left_link7",
             "r_body": "left_link7",
-            "t_weight": 3.0,
-            "r_weight": 0.6
+            "t_weight": 8.0,
+            "r_weight": 0.25
         },
         "RightArm": {
             "t_body": "right_link2",
             "r_body": "right_link2",
-            "t_weight": 2.3,
+            "t_weight": 3.0,
             "r_weight": 0.05
         },
         "RightForeArm": {
             "t_body": "right_link4",
             "r_body": "right_link4",
-            "t_weight": 1.8,
-            "r_weight": 0.05
+            "t_weight": 4.0,
+            "r_weight": 0.0
         },
         "RightHand": {
             "t_body": "right_link7",
             "r_body": "right_link7",
-            "t_weight": 2.0,
-            "r_weight": 0.15
+            "t_weight": 6.0,
+            "r_weight": 0.25
         },
         "LeftLeg": {
             "t_body": "left_hip_roll_link",

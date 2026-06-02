@@ -1,6 +1,6 @@
 {
-	"import_folder": "assets/motions/bvh/240529",
-	"export_folder": "assets/motions/t2_csv/240529",
+	"import_folder": "assets/motions/bvh/231114",
+	"export_folder": "assets/motions/t2_csv/231114",
 	"batch_size": 100,
 	"retargeter": "Newton",
 	"retarget_source": "soma",

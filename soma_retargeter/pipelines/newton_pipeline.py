@@ -12,7 +12,7 @@ import soma_retargeter.assets.bvh as bvh_utils
 import soma_retargeter.utils.newton_utils as newton_utils
 import soma_retargeter.utils.io_utils as io_utils
 import soma_retargeter.pipelines.utils as pipeline_utils
-from soma_retargeter.pipelines.ik_objectives import IKJointTarget, IKSmoothJointFilter
+from soma_retargeter.pipelines.ik_objectives import IKJointTarget, IKSmoothJointFilter, IKTemporalJointTarget
 from soma_retargeter.animation.skeleton import Skeleton, SkeletonInstance
 from soma_retargeter.animation.animation_buffer import AnimationBuffer
 from soma_retargeter.robotics.human_to_robot_scaler import HumanToRobotScaler
@@ -23,6 +23,7 @@ from soma_retargeter.pipelines.joint_limit_clamper import JointLimitClamper
 _DEFAULT_IK_SOLVER_ITERATIONS = 24
 _DEFAULT_JOINT_LIMIT_OBJECTIVE_WEIGHT = 10.0
 _DEFAULT_SMOOTH_JOINT_FILTER_OBJECTIVE_WEIGHT = 5.5
+_DEFAULT_TEMPORAL_JOINT_SMOOTH_WEIGHT = 0.0
 _DEFAULT_NUM_INITIALIZATION_FRAMES = 10
 _DEFAULT_NUM_STABILIZATION_FRAMES = 5
 
@@ -65,6 +66,8 @@ class NewtonPipeline:
         self.ik_iterations = retargeter_config.get('ik_iterations', _DEFAULT_IK_SOLVER_ITERATIONS)
         self.joint_limit_weight = retargeter_config.get('joint_limit_weight', _DEFAULT_JOINT_LIMIT_OBJECTIVE_WEIGHT)
         self.smooth_joint_filter_weight = retargeter_config.get('smooth_joint_filter_weight', _DEFAULT_SMOOTH_JOINT_FILTER_OBJECTIVE_WEIGHT)
+        self.temporal_joint_smooth_weight = retargeter_config.get('temporal_joint_smooth_weight', _DEFAULT_TEMPORAL_JOINT_SMOOTH_WEIGHT)
+        self.temporal_joint_smooth_joints = retargeter_config.get('temporal_joint_smooth_joints', [])
         self.post_processing_enabled = retargeter_config.get('enable_post_processing', True)
         self.initial_joint_q_overrides = retargeter_config.get('initial_joint_q_overrides_degrees', {})
         self.preferred_joint_q_config = retargeter_config.get('preferred_joint_q_degrees', {})
@@ -184,6 +187,7 @@ class NewtonPipeline:
         self.ik_iterations = max(1, self.ik_iterations)
         self.joint_limit_weight = max(0.0, self.joint_limit_weight)
         self.smooth_joint_filter_weight = max(0.0, self.smooth_joint_filter_weight)
+        self.temporal_joint_smooth_weight = max(0.0, self.temporal_joint_smooth_weight)
 
         print("[INFO] Newton Retargeter Settings: ")
         print(f"[INFO]\t  Source Skeleton Type: {pipeline_utils.get_source_str_from_type(self.source_type)}")
@@ -195,6 +199,7 @@ class NewtonPipeline:
         print(f"[INFO]\t  IK Solver Iterations: {self.ik_iterations}")
         print(f"[INFO]\t  Joint Limit Objective Weight: {self.joint_limit_weight}")
         print(f"[INFO]\t  Smooth Joint Filter Objective Weight: {self.smooth_joint_filter_weight}")
+        print(f"[INFO]\t  Temporal Joint Smooth Objective Weight: {self.temporal_joint_smooth_weight}")
 
         model = self._build_model(num_envs)
         state = model.state()
@@ -208,7 +213,8 @@ class NewtonPipeline:
             rotation_objectives,
             joint_limit_objective,
             smooth_joint_filter_objective,
-            joint_target_objective
+            joint_target_objective,
+            temporal_joint_smooth_objective
         ) = self._create_ik_objectives(num_envs, model, state)
 
         # Add optional objectives
@@ -219,6 +225,8 @@ class NewtonPipeline:
             ik_solver_active_objectives.append(smooth_joint_filter_objective)
         if joint_target_objective is not None:
             ik_solver_active_objectives.append(joint_target_objective)
+        if temporal_joint_smooth_objective is not None:
+            ik_solver_active_objectives.append(temporal_joint_smooth_objective)
 
         ik_solver = ik.IKSolver(
             model=self.ik_model,
@@ -230,6 +238,8 @@ class NewtonPipeline:
         joint_q = wp.empty(shape=(num_envs, self.ik_model.joint_coord_count))
         wp.copy(joint_q, model.joint_q)
         self._apply_initial_joint_q_overrides(joint_q, num_envs)
+        if temporal_joint_smooth_objective is not None:
+            temporal_joint_smooth_objective.set_targets(joint_q)
 
         # Solver initialization
         ik_solver.reset()
@@ -261,6 +271,9 @@ class NewtonPipeline:
                 for i, target in enumerate(frame_targets):
                     position_objectives[i].set_target_position(env, wp.vec3(*target[0:3]))
                     rotation_objectives[i].set_target_rotation(env, wp.quat(*target[3:7]))
+
+            if temporal_joint_smooth_objective is not None:
+                temporal_joint_smooth_objective.set_targets(joint_q)
 
             if graph_capture is not None:
                 wp.capture_launch(graph_capture)
@@ -403,8 +416,15 @@ class NewtonPipeline:
             coord_masks=self.smooth_joint_filter_coord_masks)
 
         joint_target_objective = self._create_joint_target_objective()
+        temporal_joint_smooth_objective = self._create_temporal_joint_smooth_objective()
 
-        return position_objectives, rotation_objectives, joint_limit_objective, smooth_joint_limiter_objective, joint_target_objective
+        return (
+            position_objectives,
+            rotation_objectives,
+            joint_limit_objective,
+            smooth_joint_limiter_objective,
+            joint_target_objective,
+            temporal_joint_smooth_objective)
 
     def _create_joint_target_objective(self):
         joints = self.preferred_joint_q_config.get('joints', {})
@@ -429,3 +449,33 @@ class NewtonPipeline:
             return None
 
         return IKJointTarget(coord_targets=coord_targets, coord_masks=coord_masks, weight=weight)
+
+    def _create_temporal_joint_smooth_objective(self):
+        if self.temporal_joint_smooth_weight <= 0.0 or not self.temporal_joint_smooth_joints:
+            return None
+
+        coord_masks = self._create_joint_name_coord_mask(self.temporal_joint_smooth_joints)
+        if not np.any(coord_masks):
+            return None
+
+        return IKTemporalJointTarget(
+            coord_masks=coord_masks,
+            weight=self.temporal_joint_smooth_weight)
+
+    def _create_joint_name_coord_mask(self, joint_names):
+        joint_name_set = set(joint_names)
+        coord_masks = np.zeros(self.ik_model.joint_coord_count, dtype=np.float32)
+        joint_q_start_np = self.ik_model.joint_q_start.numpy()
+        joint_dof_dim_np = self.ik_model.joint_dof_dim.numpy()
+
+        for joint_idx, (joint_label, joint_q_start) in enumerate(zip(self.ik_model.joint_label, joint_q_start_np)):
+            joint_name = newton_utils.get_name_from_label(joint_label)
+            if joint_name not in joint_name_set:
+                continue
+
+            lin, ang = joint_dof_dim_np[joint_idx]
+            dim = int(lin + ang)
+            coord_idx = int(joint_q_start)
+            coord_masks[coord_idx:coord_idx + dim] = 1.0
+
+        return coord_masks
