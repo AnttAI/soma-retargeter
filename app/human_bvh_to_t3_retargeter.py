@@ -33,8 +33,11 @@ from bvh_to_t3_converter import (  # noqa: E402
     DEFAULT_WHEEL_EXPORT,
     DEFAULT_WHEEL_RADIUS_M,
     DEFAULT_WHEEL_SEPARATION_M,
+    T3_LIFT_HEIGHT_OFFSET_M,
     _append_wheel_columns_to_t3_csv,
+    _append_lift_column_to_t3_csv,
     _convert_bvh_hips_to_wheels,
+    _compute_bvh_lift_extensions,
     _save_t3_csv_from_t2_buffer,
 )
 
@@ -96,6 +99,9 @@ def _retarget_one_bvh_to_t3_csv(
     bvh_path: Path,
     output_csv: Path,
     config: dict,
+    lift_match_target: str = "waist",
+    lift_height_offset_m: float = T3_LIFT_HEIGHT_OFFSET_M,
+    include_lift_column: bool = True,
 ) -> float:
     import warp as wp
 
@@ -119,6 +125,14 @@ def _retarget_one_bvh_to_t3_csv(
         raise RuntimeError(f"Expected one retargeted buffer for {bvh_path}, got {len(buffers)}")
 
     _save_t3_csv_from_t2_buffer(output_csv, buffers[0])
+    if include_lift_column:
+        lift_extensions = _compute_bvh_lift_extensions(
+            bvh_path,
+            config.get("retarget_source_facing_direction", "Mujoco"),
+            lift_match_target,
+            lift_height_offset_m,
+        )
+        _append_lift_column_to_t3_csv(output_csv, lift_extensions)
     return float(animation.sample_rate)
 
 
@@ -190,6 +204,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not append wheel/base columns into the T3 CSV.",
     )
+    parser.add_argument(
+        "--lift-match-target",
+        choices=("average", "waist", "shoulders"),
+        default="waist",
+        help=(
+            "Generate telescopic_lift_joint_dof from BVH height. "
+            "waist anchors the waist plus a shoulder-alignment offset; "
+            "average balances waist and shoulders; shoulders matches only shoulders."
+        ),
+    )
+    parser.add_argument(
+        "--lift-height-offset-m",
+        type=float,
+        default=T3_LIFT_HEIGHT_OFFSET_M,
+        help="Extra lift calibration in meters. Negative lowers T3; default -0.03 lowers it 3 cm.",
+    )
+    parser.add_argument("--no-lift-column", action="store_true", help="Do not add telescopic_lift_joint_dof to T3 CSVs.")
     return parser.parse_args()
 
 
@@ -218,7 +249,14 @@ def main() -> None:
         wheel_csv = _relative_output_path(bvh_path, bvh_roots, wheel_export).with_name(f"{bvh_path.stem}_diff_drive.csv")
 
         print(f"[INFO]: [{idx}/{len(bvh_paths)}] Retargeting BVH to T3 upper body: {bvh_path}")
-        sample_rate = _retarget_one_bvh_to_t3_csv(bvh_path, t3_csv, config)
+        sample_rate = _retarget_one_bvh_to_t3_csv(
+            bvh_path,
+            t3_csv,
+            config,
+            lift_match_target=args.lift_match_target,
+            lift_height_offset_m=args.lift_height_offset_m,
+            include_lift_column=not args.no_lift_column,
+        )
         fps = float(args.fps) if args.fps is not None else sample_rate
 
         print(f"[INFO]: [{idx}/{len(bvh_paths)}] Generating T3 base from human {args.base_joint} path/facing: {wheel_csv}")

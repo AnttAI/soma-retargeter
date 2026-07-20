@@ -30,6 +30,13 @@ DEFAULT_T3_VIEWER = DEFAULT_KIMODO_ROOT / "wheel_base_tools" / "view_t3_robot.py
 DEFAULT_T3_URDF = DEFAULT_KIMODO_ROOT / "robot_demo_outputs" / "t3_robot" / "T3.urdf"
 DEFAULT_WHEEL_RADIUS_M = 0.10
 DEFAULT_WHEEL_SEPARATION_M = 0.38
+T3_LIFT_COLUMN = "telescopic_lift_joint_dof"
+T3_LIFT_MIN_M = 0.0
+T3_LIFT_MAX_M = 0.55
+T3_WAIST_HEIGHT_NO_LIFT_M = 0.795
+T3_SHOULDER_HEIGHT_NO_LIFT_M = 1.15289
+T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M = 0.60
+T3_LIFT_HEIGHT_OFFSET_M = -0.03
 
 try:
     from t3_wheel_converter import _stable_path_headings, convert_t2_csv_to_t3_diff_drive
@@ -96,7 +103,117 @@ def _save_t3_csv_from_t2_buffer(path: Path, buffer) -> None:
             writer.writerow([t2_row[index] for index in t3_indices])
 
 
-def _retarget_bvh_to_t3(config: dict, t3_export: Path) -> list[tuple[Path, Path]]:
+def _compute_bvh_lift_extensions(
+    bvh_path: Path,
+    source_facing_direction: str,
+    match_target: str = "waist",
+    lift_height_offset_m: float = T3_LIFT_HEIGHT_OFFSET_M,
+    waist_joint_names: tuple[str, ...] = ("Spine1", "Spine2", "Chest"),
+    shoulder_joint_names: tuple[str, ...] = ("LeftShoulder", "RightShoulder"),
+) -> np.ndarray:
+    import warp as wp
+
+    import soma_retargeter.assets.bvh as bvh_utils
+    from soma_retargeter.utils.space_conversion_utils import SpaceConverter, get_facing_direction_type_from_str
+
+    skeleton, animation = bvh_utils.load_bvh(bvh_path)
+    converter = SpaceConverter(get_facing_direction_type_from_str(source_facing_direction))
+    offset = converter.transform(wp.transform_identity())
+
+    def joint_indices(names: tuple[str, ...]) -> list[int]:
+        indices = [skeleton.joint_index(name) for name in names]
+        return [idx for idx in indices if idx != -1]
+
+    waist_indices = joint_indices(waist_joint_names)
+    shoulder_indices = joint_indices(shoulder_joint_names)
+    if not waist_indices and match_target in {"waist", "average"}:
+        raise RuntimeError(f"BVH does not expose any waist joints {waist_joint_names!r}: {bvh_path}")
+    if not shoulder_indices and match_target in {"waist", "shoulders", "average"}:
+        raise RuntimeError(f"BVH does not expose any shoulder joints {shoulder_joint_names!r}: {bvh_path}")
+
+    lift_extensions = np.zeros(animation.num_frames, dtype=np.float64)
+    for frame_idx in range(animation.num_frames):
+        transforms = animation.compute_global_transforms(frame_idx, offset)
+        required_extensions = []
+        waist_height = None
+        shoulder_height = None
+        if match_target in {"waist", "average"}:
+            waist_height = float(np.mean([float(transforms[idx][2]) for idx in waist_indices]))
+        if match_target in {"waist", "shoulders", "average"}:
+            shoulder_height = float(np.mean([float(transforms[idx][2]) for idx in shoulder_indices]))
+
+        if match_target == "waist":
+            # Use the waist as the anchor, but shift it by the torso-proportion
+            # difference so the T3 shoulders land at the human shoulder height.
+            human_waist_to_shoulder = shoulder_height - waist_height
+            t3_waist_to_shoulder = T3_SHOULDER_HEIGHT_NO_LIFT_M - T3_WAIST_HEIGHT_NO_LIFT_M
+            shoulder_alignment_offset = human_waist_to_shoulder - t3_waist_to_shoulder
+            target_waist_height = waist_height + shoulder_alignment_offset
+            required_extensions.append(target_waist_height - T3_WAIST_HEIGHT_NO_LIFT_M)
+        elif match_target == "shoulders":
+            required_extensions.append(shoulder_height - T3_SHOULDER_HEIGHT_NO_LIFT_M)
+        elif match_target == "average":
+            required_extensions.append(waist_height - T3_WAIST_HEIGHT_NO_LIFT_M)
+            required_extensions.append(shoulder_height - T3_SHOULDER_HEIGHT_NO_LIFT_M)
+        lift_extensions[frame_idx] = float(np.mean(required_extensions))
+
+    return np.clip(lift_extensions + float(lift_height_offset_m), T3_LIFT_MIN_M, T3_LIFT_MAX_M)
+
+
+def _append_lift_column_to_t3_csv(t3_csv: Path, lift_extensions_m: np.ndarray) -> None:
+    with t3_csv.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"{t3_csv} has no header")
+        rows = list(reader)
+
+    if not rows:
+        return
+
+    original_header = [column for column in reader.fieldnames if column != T3_LIFT_COLUMN]
+    insert_idx = original_header.index("head_yaw_joint_dof") + 1 if "head_yaw_joint_dof" in original_header else len(original_header)
+    header = original_header[:insert_idx] + [T3_LIFT_COLUMN] + original_header[insert_idx:]
+
+    with t3_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        for row_idx, row in enumerate(rows):
+            out = {column: row.get(column, "") for column in original_header}
+            out[T3_LIFT_COLUMN] = float(lift_extensions_m[min(row_idx, len(lift_extensions_m) - 1)])
+            writer.writerow(out)
+    _print_lift_summary(t3_csv, lift_extensions_m)
+
+
+def _print_lift_summary(t3_csv: Path, lift_extensions_m: np.ndarray) -> None:
+    if lift_extensions_m.size == 0:
+        return
+    lift_min = float(np.min(lift_extensions_m))
+    lift_max = float(np.max(lift_extensions_m))
+    lift_first = float(lift_extensions_m[0])
+    telescope_min = T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M + lift_min
+    telescope_max = T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M + lift_max
+    waist_min = T3_WAIST_HEIGHT_NO_LIFT_M + lift_min
+    waist_max = T3_WAIST_HEIGHT_NO_LIFT_M + lift_max
+    shoulder_min = T3_SHOULDER_HEIGHT_NO_LIFT_M + lift_min
+    shoulder_max = T3_SHOULDER_HEIGHT_NO_LIFT_M + lift_max
+    print(
+        f"[INFO]: Lift column added: {t3_csv}\n"
+        f"        extension_m: first={lift_first:.4f}, min={lift_min:.4f}, max={lift_max:.4f}, "
+        f"limits=[{T3_LIFT_MIN_M:.2f}, {T3_LIFT_MAX_M:.2f}]\n"
+        f"        telescopic_abs_m: min={telescope_min:.4f}, max={telescope_max:.4f}, "
+        f"limits=[{T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M:.2f}, {T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M + T3_LIFT_MAX_M:.2f}]\n"
+        f"        t3_waist_abs_m: min={waist_min:.4f}, max={waist_max:.4f}\n"
+        f"        t3_shoulder_abs_m: min={shoulder_min:.4f}, max={shoulder_max:.4f}"
+    )
+
+
+def _retarget_bvh_to_t3(
+    config: dict,
+    t3_export: Path,
+    lift_match_target: str = "waist",
+    lift_height_offset_m: float = T3_LIFT_HEIGHT_OFFSET_M,
+    include_lift_column: bool = True,
+) -> list[tuple[Path, Path]]:
     import warp as wp
 
     import soma_retargeter.assets.bvh as bvh_utils
@@ -148,6 +265,14 @@ def _retarget_bvh_to_t3(config: dict, t3_export: Path) -> list[tuple[Path, Path]
             relative = bvh_path.relative_to(import_root).with_suffix(".csv")
             t3_csv = t3_export / relative
             _save_t3_csv_from_t2_buffer(t3_csv, csv_buffers[motion_idx])
+            if include_lift_column:
+                lift_extensions = _compute_bvh_lift_extensions(
+                    bvh_path,
+                    config.get("retarget_source_facing_direction", "Mujoco"),
+                    lift_match_target,
+                    lift_height_offset_m,
+                )
+                _append_lift_column_to_t3_csv(t3_csv, lift_extensions)
             outputs.append((bvh_path, t3_csv))
 
     return outputs
@@ -501,6 +626,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--standing-yaw-offset-deg", type=float, default=180.0, help="Extra yaw applied only to standing/in-place human-base clips.")
     parser.add_argument("--standing-motion-threshold", type=float, default=0.25, help="Treat clips with root displacement below this many meters as standing motions.")
     parser.add_argument("--standing-base-radius", type=float, default=0.04, help="Maximum XY base translation radius for standing motions, in meters.")
+    parser.add_argument(
+        "--lift-match-target",
+        choices=("average", "waist", "shoulders"),
+        default="waist",
+        help=(
+            "Generate telescopic_lift_joint_dof from BVH height. "
+            "waist anchors the waist plus a shoulder-alignment offset; "
+            "average balances waist and shoulders; shoulders matches only shoulders."
+        ),
+    )
+    parser.add_argument(
+        "--lift-height-offset-m",
+        type=float,
+        default=T3_LIFT_HEIGHT_OFFSET_M,
+        help="Extra lift calibration in meters. Negative lowers T3; default -0.03 lowers it 3 cm.",
+    )
+    parser.add_argument("--no-lift-column", action="store_true", help="Do not add telescopic_lift_joint_dof to T3 CSVs.")
     parser.add_argument("--skip-retarget", action="store_true", help="Only convert existing T3 upper-body CSVs to wheel CSVs.")
     return parser.parse_args()
 
@@ -521,7 +663,13 @@ def main() -> None:
     source_facing_direction = config.get("retarget_source_facing_direction", "Mujoco")
 
     if not args.skip_retarget:
-        _retarget_bvh_to_t3(config, t3_export)
+        _retarget_bvh_to_t3(
+            config,
+            t3_export,
+            lift_match_target=args.lift_match_target,
+            lift_height_offset_m=args.lift_height_offset_m,
+            include_lift_column=not args.no_lift_column,
+        )
 
     outputs = _convert_t3_to_wheels(
         t3_export=t3_export,

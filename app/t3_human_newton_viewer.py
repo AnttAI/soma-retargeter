@@ -46,6 +46,27 @@ try:
 except ModuleNotFoundError:
     from app.t3_wheel_converter import _stable_path_headings, convert_t2_csv_to_t3_diff_drive
 
+try:
+    from bvh_to_t3_converter import (
+        T3_LIFT_COLUMN,
+        T3_LIFT_HEIGHT_OFFSET_M,
+        T3_LIFT_MAX_M,
+        T3_LIFT_MIN_M,
+        T3_SHOULDER_HEIGHT_NO_LIFT_M,
+        T3_WAIST_HEIGHT_NO_LIFT_M,
+        _compute_bvh_lift_extensions,
+    )
+except ModuleNotFoundError:
+    from app.bvh_to_t3_converter import (
+        T3_LIFT_COLUMN,
+        T3_LIFT_HEIGHT_OFFSET_M,
+        T3_LIFT_MAX_M,
+        T3_LIFT_MIN_M,
+        T3_SHOULDER_HEIGHT_NO_LIFT_M,
+        T3_WAIST_HEIGHT_NO_LIFT_M,
+        _compute_bvh_lift_extensions,
+    )
+
 
 DEFAULT_KIMODO_ROOT = Path("/home/jony/Downloads/kimodo")
 DEFAULT_T3_URDF = Path("/home/jony/Downloads/kimodo/robot_demo_outputs/t3_robot/T3.urdf")
@@ -56,6 +77,8 @@ T3_SHOULDER_HEIGHT_M = 0.5 * (T3_LEFT_SHOULDER_HEIGHT_M + T3_RIGHT_SHOULDER_HEIG
 _UI_PANEL_WIDTH = 320
 _UI_PANEL_MARGIN = 10
 _UI_PANEL_ALPHA = 0.9
+T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M = 0.60
+T3_LINEAR_JOINTS = {"telescopic_lift_joint"}
 
 T2_TO_T3_JOINTS = {
     "waist_yaw_joint_dof": "waist_yaw_joint",
@@ -63,6 +86,7 @@ T2_TO_T3_JOINTS = {
     "waist_pitch_joint_dof": "waist_pitch_joint",
     "head_pitch_joint_dof": "head_pitch_joint",
     "head_yaw_joint_dof": "head_yaw_joint",
+    "telescopic_lift_joint_dof": "telescopic_lift_joint",
     "right_joint1_dof": "right_joint1",
     "right_joint2_dof": "right_joint2",
     "right_joint3_dof": "right_joint3",
@@ -87,7 +111,7 @@ T3_CSV_HEADER = [
     "root_translateX", "root_translateY", "root_translateZ",
     "root_rotateX", "root_rotateY", "root_rotateZ",
     "waist_yaw_joint_dof", "waist_roll_joint_dof", "waist_pitch_joint_dof",
-    "head_pitch_joint_dof", "head_yaw_joint_dof",
+    "head_pitch_joint_dof", "head_yaw_joint_dof", T3_LIFT_COLUMN,
     "right_joint1_dof", "right_joint2_dof", "right_joint3_dof",
     "right_joint4_dof", "right_joint5_dof", "right_joint6_dof",
     "right_joint7_dof",
@@ -303,7 +327,8 @@ def _read_t2_motion(path: Path, fps: float) -> T2Motion:
     joint_angles: dict[str, np.ndarray] = {}
     for column_name, joint_name in T2_TO_T3_JOINTS.items():
         if column_name in header:
-            joint_angles[joint_name] = np.deg2rad(data[:, header.index(column_name)]).astype(np.float64)
+            values = data[:, header.index(column_name)].astype(np.float64)
+            joint_angles[joint_name] = values if joint_name in T3_LINEAR_JOINTS else np.deg2rad(values)
 
     root_pos = np.zeros((data.shape[0], 3), dtype=np.float64)
     root_quat = np.zeros((data.shape[0], 4), dtype=np.float64)
@@ -399,10 +424,15 @@ def _save_t3_csv_from_buffer(
     buffer,
     wheel_motion: WheelMotion | None = None,
     wheel_radius_m: float = 0.10,
+    synthetic_motion: T2Motion | None = None,
 ) -> None:
     t2_config = csv_utils.get_csv_config("t2")
     t2_header = t2_config.csv_header
-    t3_indices = [t2_header.index(column) for column in T3_CSV_HEADER]
+    t3_indices = {
+        column: t2_header.index(column)
+        for column in T3_CSV_HEADER
+        if column in t2_header
+    }
     fps = float(getattr(buffer, "sample_rate", 30.0))
     header = T3_CSV_HEADER + (T3_WHEEL_CSV_COLUMNS if wheel_motion is not None else [])
 
@@ -412,7 +442,16 @@ def _save_t3_csv_from_buffer(
         writer.writerow(header)
         for frame_idx in range(buffer.num_frames):
             t2_row = t2_config.to_csv_row(frame_idx, buffer.get_data(frame_idx))
-            row = [t2_row[index] for index in t3_indices]
+            row = []
+            for column_name in T3_CSV_HEADER:
+                column_idx = t3_indices.get(column_name)
+                if column_idx is not None:
+                    row.append(t2_row[column_idx])
+                    continue
+                joint_name = T2_TO_T3_JOINTS.get(column_name)
+                values = synthetic_motion.joint_angles.get(joint_name) if synthetic_motion is not None and joint_name is not None else None
+                value = float(values[min(frame_idx, len(values) - 1)]) if values is not None and len(values) else 0.0
+                row.append(value if joint_name in T3_LINEAR_JOINTS else math.degrees(value))
             if wheel_motion is not None:
                 row.extend(_wheel_csv_row_values(wheel_motion, frame_idx, fps, wheel_radius_m))
             writer.writerow(row)
@@ -440,7 +479,7 @@ def _save_t3_csv_from_motion(
                 joint_name = T2_TO_T3_JOINTS[column_name]
                 values = motion.joint_angles.get(joint_name)
                 value = float(values[frame_idx]) if values is not None else 0.0
-                row.append(math.degrees(value))
+                row.append(value if joint_name in T3_LINEAR_JOINTS else math.degrees(value))
             if wheel_motion is not None:
                 row.extend(_wheel_csv_row_values(wheel_motion, frame_idx, motion.sample_rate, wheel_radius_m))
             writer.writerow(row)
@@ -468,15 +507,21 @@ def _save_wheel_motion_csv(
 
 
 def _t2_buffer_to_motion(buffer, sample_rate: float) -> T2Motion:
-    joint_angles: dict[str, list[float]] = {joint_name: [] for joint_name in T2_TO_T3_JOINTS.values()}
+    header = csv_utils.get_csv_config("t2").csv_header
+    joint_angles: dict[str, list[float]] = {
+        joint_name: []
+        for column_name, joint_name in T2_TO_T3_JOINTS.items()
+        if column_name in header
+    }
     root_pos_values: list[np.ndarray] = []
     root_quat_values: list[np.ndarray] = []
-    header = csv_utils.get_csv_config("t2").csv_header
     for frame_idx in range(buffer.num_frames):
         data = buffer.get_data(frame_idx)
         root_pos_values.append(np.asarray(data[0:3], dtype=np.float64))
         root_quat_values.append(np.asarray(data[3:7], dtype=np.float64))
         for column_name, joint_name in T2_TO_T3_JOINTS.items():
+            if column_name not in header:
+                continue
             column_idx = header.index(column_name)
             # Buffer data omits the Frame column and stores joints in radians.
             joint_angles[joint_name].append(float(data[column_idx]))
@@ -647,8 +692,10 @@ class T3HumanNewtonViewer:
         self.skeleton_renderer = None
         self.skeletal_mesh = None
         self.skeletal_mesh_renderer = None
+        self.compare_human = None
         self.human_display_origin = wp.transform_identity()
         self.human_offset = wp.transform(wp.vec3(args.human_x, args.human_y, 0.0), wp.quat_identity())
+        self.compare_human_offset = wp.transform(wp.vec3(args.compare_human_x, args.compare_human_y, 0.0), wp.quat_identity())
         self.t3_offset = wp.transform(wp.vec3(args.t3_x, args.t3_y, args.t3_z), wp.quat_identity())
         self.t3_gizmo_pivot = np.array(
             [args.robot_gizmo_pivot_x, args.robot_gizmo_pivot_y, args.robot_gizmo_pivot_z],
@@ -719,18 +766,21 @@ class T3HumanNewtonViewer:
             return None
         return sum(heights) / len(heights)
 
-    def _compute_human_display_origin(self) -> wp.transform:
-        if self.skeleton is None or self.animation is None or self.skeleton_instance is None:
-            return wp.transform_identity()
-
-        self.skeleton_instance.set_local_transforms(self.animation.sample(0.0))
-        transforms = self.skeleton_instance.compute_global_transforms()
-        joint_idx = self.skeleton.joint_index("Hips")
+    def _compute_skeleton_display_origin(self, skeleton, animation, skeleton_instance) -> wp.transform:
+        skeleton_instance.set_local_transforms(animation.sample(0.0))
+        transforms = skeleton_instance.compute_global_transforms()
+        joint_idx = skeleton.joint_index("Hips")
         if joint_idx == -1:
             joint_idx = 0
 
         p = transforms[joint_idx]
         return wp.transform(wp.vec3(-float(p[0]), -float(p[1]), 0.0), wp.quat_identity())
+
+    def _compute_human_display_origin(self) -> wp.transform:
+        if self.skeleton is None or self.animation is None or self.skeleton_instance is None:
+            return wp.transform_identity()
+
+        return self._compute_skeleton_display_origin(self.skeleton, self.animation, self.skeleton_instance)
 
     def _match_t3_scale_to_human_shoulders(self) -> None:
         human_shoulder_height = self._human_shoulder_height_at_start()
@@ -1104,6 +1154,63 @@ class T3HumanNewtonViewer:
         self.skeletal_mesh_renderer = SkeletalMeshRenderer(self.skeletal_mesh)
         self._compute_playback_total_time()
 
+    def load_compare_human_bvh_file(self, path: str | Path) -> None:
+        path = Path(path).expanduser().resolve()
+        skeleton, animation = bvh_utils.load_bvh(path)
+        skeleton_instance = SkeletonInstance(
+            skeleton,
+            (96.0 / 255.0, 220.0 / 255.0, 255.0 / 255.0),
+            self.converter.transform(wp.transform_identity()),
+        )
+        display_origin = self._compute_skeleton_display_origin(skeleton, animation, skeleton_instance)
+        skeletal_mesh = pipeline_utils.get_source_model_mesh(pipeline_utils.SourceType.SOMA, skeleton)
+        self.compare_human = {
+            "path": path,
+            "skeleton": skeleton,
+            "animation": animation,
+            "instance": skeleton_instance,
+            "display_origin": display_origin,
+            "skeleton_renderer": SkeletonRenderer(skeleton, [1]),
+            "mesh_renderer": SkeletalMeshRenderer(skeletal_mesh),
+        }
+
+    def _add_lift_to_current_motion(self) -> None:
+        if self.t2_motion is None or self.current_bvh is None:
+            return
+        lift_extensions = _compute_bvh_lift_extensions(
+            self.current_bvh,
+            "Mujoco",
+            self.args.lift_match_target,
+            self.args.lift_height_offset_m,
+        )
+        if lift_extensions.size == 0:
+            return
+        if lift_extensions.shape[0] != self.t2_motion.num_frames:
+            sample_x = np.linspace(0.0, 1.0, lift_extensions.shape[0])
+            target_x = np.linspace(0.0, 1.0, self.t2_motion.num_frames)
+            lift_extensions = np.interp(target_x, sample_x, lift_extensions)
+        self.t2_motion.joint_angles["telescopic_lift_joint"] = lift_extensions.astype(np.float64)
+        self._print_lift_summary(lift_extensions)
+
+    def _print_lift_summary(self, lift_extensions: np.ndarray) -> None:
+        lift_min = float(np.min(lift_extensions))
+        lift_max = float(np.max(lift_extensions))
+        lift_first = float(lift_extensions[0])
+        telescope_min = T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M + lift_min
+        telescope_max = T3_TELESCOPIC_ABSOLUTE_MIN_HEIGHT_M + lift_max
+        waist_min = T3_WAIST_HEIGHT_NO_LIFT_M + lift_min
+        waist_max = T3_WAIST_HEIGHT_NO_LIFT_M + lift_max
+        shoulder_min = T3_SHOULDER_HEIGHT_NO_LIFT_M + lift_min
+        shoulder_max = T3_SHOULDER_HEIGHT_NO_LIFT_M + lift_max
+        print(
+            "[INFO]: T3 lift height match "
+            f"target={self.args.lift_match_target} "
+            f"extension_m first={lift_first:.4f} min={lift_min:.4f} max={lift_max:.4f} "
+            f"telescopic_abs_m min={telescope_min:.4f} max={telescope_max:.4f} "
+            f"waist_abs_m min={waist_min:.4f} max={waist_max:.4f} "
+            f"shoulder_abs_m min={shoulder_min:.4f} max={shoulder_max:.4f}"
+        )
+
     def retarget_motion(self) -> None:
         if self.skeleton is None or self.animation is None or self.skeleton_instance is None:
             return
@@ -1122,6 +1229,7 @@ class T3HumanNewtonViewer:
         self.t2_buffer = buffers[0]
         motion_fps = float(self.t2_buffer.sample_rate)
         self.t2_motion = _t2_buffer_to_motion(self.t2_buffer, motion_fps)
+        self._add_lift_to_current_motion()
 
         temp_dir = Path(tempfile.gettempdir()) / "soma-retargeter-t3-viewer"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -1129,7 +1237,7 @@ class T3HumanNewtonViewer:
         t2_csv = temp_dir / f"{stem}_t3.csv"
         wheel_csv = temp_dir / f"{stem}_diff_drive.csv"
         if self.t2_buffer is not None:
-            _save_t3_csv_from_buffer(t2_csv, self.t2_buffer)
+            _save_t3_csv_from_buffer(t2_csv, self.t2_buffer, synthetic_motion=self.t2_motion)
         else:
             _save_t3_csv_from_motion(t2_csv, self.t2_motion)
         self.current_t2_csv = t2_csv
@@ -1156,7 +1264,7 @@ class T3HumanNewtonViewer:
         else:
             self.wheel_motion = None
         if self.t2_buffer is not None:
-            _save_t3_csv_from_buffer(t2_csv, self.t2_buffer, self.wheel_motion, self.args.wheel_radius)
+            _save_t3_csv_from_buffer(t2_csv, self.t2_buffer, self.wheel_motion, self.args.wheel_radius, self.t2_motion)
         else:
             _save_t3_csv_from_motion(t2_csv, self.t2_motion, self.wheel_motion, self.args.wheel_radius)
         self._compute_playback_total_time()
@@ -1166,7 +1274,7 @@ class T3HumanNewtonViewer:
             return
         path = Path(path).expanduser().resolve()
         if self.t2_buffer is not None:
-            _save_t3_csv_from_buffer(path, self.t2_buffer, self.wheel_motion, self.args.wheel_radius)
+            _save_t3_csv_from_buffer(path, self.t2_buffer, self.wheel_motion, self.args.wheel_radius, self.t2_motion)
         else:
             _save_t3_csv_from_motion(path, self.t2_motion, self.wheel_motion, self.args.wheel_radius)
         wheel_csv = self._wheel_csv_for_t2_csv(path)
@@ -1248,6 +1356,11 @@ class T3HumanNewtonViewer:
         self.t3_offset = self._gizmo_to_root_transform(self.t3_gizmo_offset)
         if self.skeleton_instance is not None and self.animation is not None:
             self.skeleton_instance.set_local_transforms(self.animation.sample(self.playback_time))
+        if self.compare_human is not None:
+            compare_animation = self.compare_human["animation"]
+            compare_instance = self.compare_human["instance"]
+            compare_time = min(float(self.playback_time), compare_animation.num_frames / compare_animation.sample_rate)
+            compare_instance.set_local_transforms(compare_animation.sample(compare_time))
         self._apply_t3_frame()
 
     def render(self):
@@ -1266,8 +1379,25 @@ class T3HumanNewtonViewer:
                 self.coordinate_renderer.draw(self.viewer, self.skeleton_instance.compute_global_transforms(), 0.1, 0)
             self.skeleton_instance.xform = prev_xform
 
+        if self.compare_human is not None:
+            compare_instance = self.compare_human["instance"]
+            prev_xform = wp.transform(compare_instance.xform)
+            compare_instance.xform = wp.mul(
+                self.compare_human_offset,
+                wp.mul(self.compare_human["display_origin"], compare_instance.xform),
+            )
+            if self.show_human_mesh:
+                self.compare_human["mesh_renderer"].draw(self.viewer, compare_instance, compare_instance.color, 1)
+            if self.show_human_skeleton:
+                self.compare_human["skeleton_renderer"].draw(self.viewer, compare_instance, 1)
+            if self.show_joint_axes:
+                self.coordinate_renderer.draw(self.viewer, compare_instance.compute_global_transforms(), 0.1, 1)
+            compare_instance.xform = prev_xform
+
         if self.show_gizmos:
             self.viewer.log_gizmo("human_offset", self.human_offset)
+            if self.compare_human is not None:
+                self.viewer.log_gizmo("compare_human_offset", self.compare_human_offset)
             self.viewer.log_gizmo("robot_offset0", self.t3_gizmo_offset)
         self.viewer.log_state(self.state)
         if self.cpu_robot_mesh_renderer is not None:
@@ -1450,6 +1580,7 @@ def parse_args():
     parser = newton.examples.create_parser()
     parser.set_defaults(viewer="gl")
     parser.add_argument("--bvh", type=Path, default=None, help="Optional BVH to load at startup.")
+    parser.add_argument("--compare-human-bvh", type=Path, default=None, help="Optional second human BVH to show beside the main BVH.")
     parser.add_argument("--t2-csv", type=Path, default=None, help="Optional T2/T3 CSV for T3 upper-body motion.")
     parser.add_argument("--wheel-csv", type=Path, default=None, help="Optional wheel/diff-drive CSV for T3 base motion.")
     parser.add_argument("--base-mode", choices=("free", "fixed", "wheels"), default="free", help="T3 base behavior. free uses wheel-base compensation; fixed locks base; wheels follows generated diff-drive motion.")
@@ -1462,6 +1593,18 @@ def parse_args():
     parser.add_argument("--base-reach-correction-gain", type=float, default=1.0, help="Gain for base reach correction. 1.0 fully applies the computed wrist-error correction.")
     parser.add_argument("--standing-motion-threshold", type=float, default=0.25, help="Treat clips with root displacement below this many meters as standing motions.")
     parser.add_argument("--standing-base-radius", type=float, default=0.04, help="Maximum XY base translation radius for standing motions, in meters.")
+    parser.add_argument(
+        "--lift-match-target",
+        choices=("average", "waist", "shoulders"),
+        default="waist",
+        help="Drive T3 telescopic lift from human waist plus shoulder-offset, shoulder height, or the average of waist/shoulders.",
+    )
+    parser.add_argument(
+        "--lift-height-offset-m",
+        type=float,
+        default=T3_LIFT_HEIGHT_OFFSET_M,
+        help="Extra lift calibration in meters. Negative lowers T3; default -0.03 lowers it 3 cm.",
+    )
     parser.add_argument("--kimodo-root", type=Path, default=DEFAULT_KIMODO_ROOT, help="Kimodo checkout root for auto-generating wheel CSVs.")
     parser.add_argument("--t3-urdf", type=Path, default=DEFAULT_T3_URDF, help="T3 URDF path.")
     parser.add_argument("--fps", type=float, default=120.0, help="T2 and wheel CSV FPS.")
@@ -1479,6 +1622,8 @@ def parse_args():
     parser.add_argument("--robot-gizmo-pivot-z", type=float, default=0.0, help="Local T3 root Z pivot used for the robot gizmo.")
     parser.add_argument("--human-x", type=float, default=0.0, help="Human x offset.")
     parser.add_argument("--human-y", type=float, default=0.0, help="Human y offset.")
+    parser.add_argument("--compare-human-x", type=float, default=0.8, help="Second human x offset.")
+    parser.add_argument("--compare-human-y", type=float, default=0.0, help="Second human y offset.")
     parser.add_argument("--follow-t2-posture", dest="stiff_posture", action="store_false", help="Let T3 copy T2 waist/head joints.")
     parser.set_defaults(stiff_posture=True)
     parser.set_defaults(regenerate_wheel_csv=True)
@@ -1493,6 +1638,8 @@ def main():
             raise FileNotFoundError(f"{path_name.replace('_', '-')} not found: {path}")
     if args.bvh is not None and not args.bvh.exists():
         raise FileNotFoundError(f"bvh not found: {args.bvh}")
+    if args.compare_human_bvh is not None and not args.compare_human_bvh.exists():
+        raise FileNotFoundError(f"compare-human-bvh not found: {args.compare_human_bvh}")
     if args.t2_csv is not None and not args.t2_csv.exists():
         raise FileNotFoundError(f"t2-csv not found: {args.t2_csv}")
     if args.wheel_csv is not None and not args.wheel_csv.exists():
@@ -1516,6 +1663,8 @@ def main():
         app = T3HumanNewtonViewer(viewer, args)
         if args.bvh is not None:
             app.load_bvh_file(args.bvh)
+        if args.compare_human_bvh is not None:
+            app.load_compare_human_bvh_file(args.compare_human_bvh)
         if args.t2_csv is not None:
             app._reload_t2_pair(args.t2_csv, args.wheel_csv)
         app.run()
