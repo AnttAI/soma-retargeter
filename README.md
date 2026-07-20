@@ -99,6 +99,12 @@ The default config opens the viewer with the local T2 robot in the 3D viewport. 
 
 To switch the interactive viewer to another retarget workflow, set `"viewer_robot"` and `"retarget_target"` to `"unitree_g1"` or `"tara"` in [assets/default_bvh_to_csv_converter_config.json](/home/jony/soma-retargeter/assets/default_bvh_to_csv_converter_config.json).
 
+For T3 retargeting with telescopic lift height matching from the human waist/shoulder height, run:
+
+```bash
+python ./app/bvh_to_t3_csv_converter.py --viewer gl --lift-match-target waist
+```
+
 ### Robot asset viewer
 
 Load a robot model directly into the simulation environment without running the retargeting pipeline.
